@@ -23,6 +23,7 @@ pnpm-debug.log*
 
 # Binaries & build outputs
 *.exe
+*.lnk
 dist/
 build/
 

@@ -463,35 +463,30 @@ app.post('/api/games/:id/open-folder', (req, res) => {
     return res.status(404).json({ success: false, error: 'No save files found for this game' });
   }
 
+  const path = require('path');
+  const fs = require('fs');
+  const { spawn } = require('child_process');
+
   const firstFile = scan.files[0].absolutePath;
-  const folderToOpen = require('path').dirname(firstFile);
-  const { exec } = require('child_process');
+  const folderToOpen = path.normalize(path.dirname(firstFile));
+
+  if (!fs.existsSync(folderToOpen)) {
+    return res.status(404).json({ success: false, error: 'Thư mục save không tồn tại trên máy tính' });
+  }
 
   if (process.platform === 'win32') {
-    // Bring Explorer directly to the foreground
-    const safeTarget = firstFile.replace(/'/g, "''");
-    const psScript = `
-      $t = '${safeTarget}';
-      $f = Split-Path $t;
-      $fn = Split-Path $f -Leaf;
-      Start-Process explorer.exe -ArgumentList "/select,\`"$t\`"";
-      $ws = New-Object -ComObject WScript.Shell;
-      for ($i = 0; $i -lt 6; $i++) {
-        Start-Sleep -Milliseconds 120;
-        $ws.SendKeys('%');
-        if ($ws.AppActivate($fn)) { break; }
-      }
-    `.replace(/\r?\n/g, ' ');
-
-    exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, (err) => {
-      if (err) {
-        exec(`explorer.exe /select,"${firstFile}"`);
-      }
+    // Open the folder directly with Windows Explorer
+    const child = spawn('explorer.exe', [folderToOpen], {
+      detached: true,
+      stdio: 'ignore'
     });
+    child.unref();
   } else if (process.platform === 'darwin') {
-    exec(`open -R "${firstFile}"`);
+    const child = spawn('open', [folderToOpen], { detached: true, stdio: 'ignore' });
+    child.unref();
   } else {
-    exec(`xdg-open "${folderToOpen}"`);
+    const child = spawn('xdg-open', [folderToOpen], { detached: true, stdio: 'ignore' });
+    child.unref();
   }
 
   res.json({ success: true, folder: folderToOpen });

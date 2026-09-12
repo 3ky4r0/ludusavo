@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SaveSync — Game Save Sync</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <link rel="stylesheet" href="style.css?v=1.3">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-wrap">
+          <img src="icon-512.png" class="brand-logo-img" width="22" height="22" alt="SaveSync Logo">
+          <h1 class="logo">SaveSync</h1>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="manifest-pill" id="manifest-stat" title="Total games supported in Ludusavi manifest">
+          <i data-lucide="database" class="icon-sm"></i>
+          Manifest: <strong id="manifest-count">...</strong> games
+        </span>
+        <button id="btn-update-manifest" class="btn btn-secondary btn-sm" title="Refresh Ludusavi Manifest from GitHub">
+          <i data-lucide="refresh-cw" class="icon-sm"></i>
+          Update Manifest
+        </button>
+        <button id="btn-refresh" class="btn btn-secondary btn-sm" title="Rescan local save files">
+          <i data-lucide="scan" class="icon-sm"></i>
+          Rescan
+        </button>
+        <button id="btn-sync-all" class="btn btn-primary btn-sm" title="Synchronize all detected games with GitHub">
+          <i data-lucide="refresh-ccw" class="icon-sm"></i>
+          Sync All
+        </button>
+      </div>
+    </header>
+
+    <!-- GitHub Status Bar -->
+    <div id="github-banner" class="banner banner-warn hidden">
+      <div class="banner-content">
+        <i data-lucide="alert-circle" class="banner-icon"></i>
+        <div>
+          <span class="banner-title">GitHub Not Configured</span>
+          <span class="banner-desc">Set <code>GITHUB_TOKEN</code>, <code>GITHUB_OWNER</code>, and <code>GITHUB_REPO</code> in your <code>.env</code> file for cloud sync. Local backups work offline without GitHub.</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="github-connected" class="banner banner-info hidden">
+      <div class="banner-content">
+        <i data-lucide="github" class="banner-icon"></i>
+        <div>
+          <span class="banner-title">Connected</span>
+          <span class="banner-desc" id="github-repo-text">Storage: github.com/...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls Bar -->
+    <div class="controls-bar">
+      <div class="search-wrap">
+        <i data-lucide="search" class="search-icon"></i>
+        <input 
+          type="text" 
+          id="search-input" 
+          placeholder="Search games..." 
+          autocomplete="off" 
+          spellcheck="false"
+        />
+        <button id="clear-search" class="clear-btn hidden" aria-label="Clear search">
+          <i data-lucide="x" class="icon-sm"></i>
+        </button>
+      </div>
+
+      <!-- Status Filter Tabs -->
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">
+          All (<span id="count-all">0</span>)
+        </button>
+        <button class="filter-tab" data-filter="remote_newer" title="Games with newer backup on GitHub">
+          <i data-lucide="cloud-download" class="icon-xs"></i> Remote Update
+        </button>
+        <button class="filter-tab" data-filter="local_newer" title="Games with newer local save">
+          <i data-lucide="hard-drive" class="icon-xs"></i> Local Changes
+        </button>
+        <button class="filter-tab" data-filter="synced" title="Synchronized games">
+          <i data-lucide="check" class="icon-xs"></i> Synced
+        </button>
+      </div>
+
+      <div class="detected-badge">
+        <span id="count-found">0</span> detected
+      </div>
+    </div>
+
+    <!-- Main List Container -->
+    <main class="game-list-wrap">
+      <div id="loading-state" class="state-message">
+        <div class="spinner"></div>
+        <p>Scanning game saves...</p>
+      </div>
+
+      <div id="empty-state" class="state-message hidden">
+        <i data-lucide="ghost" class="empty-icon"></i>
+        <p class="state-title">No games found</p>
+        <p class="state-desc">Try clearing the search or switching the filter tab.</p>
+      </div>
+
+      <div id="game-list" class="game-list"></div>
+    </main>
+  </div>
+
+  <!-- Conflict Modal Dialog -->
+  <div id="conflict-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-header-content">
+          <i data-lucide="alert-triangle" class="conflict-icon"></i>
+          <h3>Save Conflict Detected</h3>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p class="conflict-game-name" id="conflict-game-title">Game Title</p>
+        <p class="conflict-desc">Both your local save and the GitHub remote save have changes since last sync. Choose which version you want to keep:</p>
+        
+        <div class="conflict-details">
+          <div class="conflict-box">
+            <h4><i data-lucide="hard-drive" class="icon-xs"></i> Local Save (PC)</h4>
+            <div id="conflict-local-info" class="meta-row">Size: - | Modified: -</div>
+          </div>
+          <div class="conflict-box">
+            <h4><i data-lucide="cloud" class="icon-xs"></i> Remote Save (GitHub)</h4>
+            <div id="conflict-remote-info" class="meta-row">Size: - | Modified: -</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-conflict-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="btn-conflict-remote" class="btn btn-purple">
+          <i data-lucide="cloud-download" class="icon-sm"></i>
+          Use Remote (Overwrite Local)
+        </button>
+        <button id="btn-conflict-local" class="btn btn-primary">
+          <i data-lucide="cloud-upload" class="icon-sm"></i>
+          Keep Local (Upload to GitHub)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Lucide Icons and Application Script -->
+  <script src="lucide.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -72,3 +72,38 @@ test('REST API: GET /api/github/rate-limit', async () => {
     server.close();
   }
 });
+
+test('REST API: DELETE /api/games/:id/cloud handles not found', async () => {
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  try {
+    const res = await fetch(`http://localhost:${port}/api/games/non-existent-game-xyz/cloud`, { method: 'DELETE' });
+    assert.strictEqual(res.status, 404);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+  } finally {
+    server.close();
+  }
+});
+
+test('REST API: GET /api/poster/:appId loads local or 404 cleanly', async () => {
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  try {
+    // 1. Invalid appId returns 404
+    const invalidRes = await fetch(`http://localhost:${port}/api/poster/invalid-fake-app-9999999999999`);
+    assert.strictEqual(invalidRes.status, 404);
+
+    // 2. Persona 5 Royal or local Steam game returns 200 with image headers
+    const res = await fetch(`http://localhost:${port}/api/poster/1018130`);
+    if (res.status === 200) {
+      assert.ok(res.headers.get('content-type').includes('image'));
+      assert.ok(res.headers.get('x-poster-source'));
+    }
+  } finally {
+    server.close();
+  }
+});
+

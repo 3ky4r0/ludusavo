@@ -151,24 +151,32 @@ class GitHubClient {
   }
 
   /**
-   * Check repository accessibility and authentication
+   * Check repository accessibility and authentication (cached for 30s)
    */
-  async checkRepository() {
+  async checkRepository(force = false) {
+    const now = Date.now();
+    if (!force && this._cachedRepoStatus && (now - (this._lastRepoCheckTime || 0) < 30000)) {
+      return this._cachedRepoStatus;
+    }
     try {
       const res = await this.request('', { method: 'GET' });
       const data = await res.json();
       this.cachedDefaultBranch = data.default_branch || 'main';
-      return {
+      this._cachedRepoStatus = {
         accessible: true,
         private: data.private,
         fullName: data.full_name,
         defaultBranch: data.default_branch
       };
+      this._lastRepoCheckTime = now;
+      return this._cachedRepoStatus;
     } catch (err) {
-      return {
+      this._cachedRepoStatus = {
         accessible: false,
         error: err.message
       };
+      this._lastRepoCheckTime = now;
+      return this._cachedRepoStatus;
     }
   }
 
@@ -366,6 +374,38 @@ class GitHubClient {
     });
     this.invalidateCache();
     return await res.json();
+  }
+
+  /**
+   * List all files in the repository for a specific game
+   * @param {string} gameId
+   * @returns {Promise<Array<{path: string, sha: string, size?: number}>>}
+   */
+  async listFiles(gameId) {
+    const files = [];
+    try {
+      const filesMap = await this.getRemoteFilesMap(true);
+      const prefix = `saves/${gameId}/`;
+      for (const [filePath, item] of filesMap.entries()) {
+        if (filePath.startsWith(prefix)) {
+          files.push(item);
+        }
+      }
+    } catch {
+      // Fall back to direct checks if getRemoteFilesMap fails
+    }
+
+    if (files.length === 0) {
+      const metaCheck = await this.fileExists(`saves/${gameId}/meta.json`);
+      if (metaCheck.exists && metaCheck.sha) {
+        files.push({ path: `saves/${gameId}/meta.json`, sha: metaCheck.sha });
+      }
+      const zipCheck = await this.fileExists(`saves/${gameId}/latest.zip`);
+      if (zipCheck.exists && zipCheck.sha) {
+        files.push({ path: `saves/${gameId}/latest.zip`, sha: zipCheck.sha });
+      }
+    }
+    return files;
   }
 }
 

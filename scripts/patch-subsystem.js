@@ -60,8 +60,20 @@ async function patch() {
   const subsystemOffset = peOffset + 24 + 68;
   buf.writeUInt16LE(2, subsystemOffset);
 
-  fs.writeFileSync(targetExe, buf);
-  console.log('[patch-subsystem] Successfully converted SaveSync.exe to GUI Subsystem (No console window).');
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    try {
+      fs.writeFileSync(targetExe, buf);
+      console.log('[patch-subsystem] Successfully converted SaveSync.exe to GUI Subsystem (No console window).');
+      return;
+    } catch (err) {
+      if ((err.code === 'EBUSY' || err.code === 'EPERM') && attempt < 20) {
+        console.log(`[patch-subsystem] Target locked, retrying write (${attempt}/20)...`);
+        await sleep(500);
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 patch().catch(err => {

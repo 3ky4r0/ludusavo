@@ -63,6 +63,285 @@ class Scanner {
     return roots;
   }
 
+  getSteamRoots() {
+    const steamRoots = [];
+    const candidates = [
+      'C:\\Program Files (x86)\\Steam',
+      'C:\\Program Files\\Steam',
+      'D:\\Steam',
+      'E:\\Steam'
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        steamRoots.push(c);
+      }
+    }
+    return steamRoots;
+  }
+
+  getSteamLibraryFolders() {
+    const libraries = new Set(this.getSteamRoots());
+    for (const root of this.getSteamRoots()) {
+      const vdfPath = path.join(root, 'steamapps', 'libraryfolders.vdf');
+      if (fs.existsSync(vdfPath)) {
+        try {
+          const content = fs.readFileSync(vdfPath, 'utf8');
+          const matches = content.matchAll(/"path"\s+"([^"]+)"/g);
+          for (const m of matches) {
+            const libPath = m[1].replace(/\\\\/g, '\\');
+            if (fs.existsSync(libPath)) {
+              libraries.add(libPath);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return Array.from(libraries);
+  }
+
+  getSteamGameInstallDir(appId) {
+    if (!appId) return null;
+    const libraries = this.getSteamLibraryFolders();
+    for (const lib of libraries) {
+      const manifestPath = path.join(lib, 'steamapps', `appmanifest_${appId}.acf`);
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const content = fs.readFileSync(manifestPath, 'utf8');
+          const match = content.match(/"installdir"\s+"([^"]+)"/);
+          if (match) {
+            const installPath = path.join(lib, 'steamapps', 'common', match[1]);
+            if (fs.existsSync(installPath)) {
+              return installPath;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return null;
+  }
+
+  getActiveSteamUserId() {
+    for (const root of this.getSteamRoots()) {
+      const loginUsersPath = path.join(root, 'config', 'loginusers.vdf');
+      if (fs.existsSync(loginUsersPath)) {
+        try {
+          const content = fs.readFileSync(loginUsersPath, 'utf8');
+          let mostRecentAccount = null;
+          let highestTimestamp = 0;
+          const userBlocks = content.split(/"(\d{17})"/);
+          for (let i = 1; i < userBlocks.length; i += 2) {
+            const steam64 = userBlocks[i];
+            const block = userBlocks[i + 1] || '';
+            const tsMatch = block.match(/"Timestamp"\s+"(\d+)"/i);
+            const mrMatch = block.match(/"MostRecent"\s+"1"/i);
+            const ts = tsMatch ? parseInt(tsMatch[1], 10) : 0;
+            if (mrMatch || ts > highestTimestamp) {
+              highestTimestamp = ts;
+              mostRecentAccount = steam64;
+              if (mrMatch) break;
+            }
+          }
+          if (mostRecentAccount) {
+            try {
+              const accountId3 = (BigInt(mostRecentAccount) - 76561197960265728n).toString();
+              return accountId3;
+            } catch {}
+          }
+        } catch {}
+      }
+
+      const userdataDir = path.join(root, 'userdata');
+      if (fs.existsSync(userdataDir)) {
+        try {
+          const dirs = fs.readdirSync(userdataDir)
+            .filter(d => /^\d+$/.test(d))
+            .map(d => {
+              const p = path.join(userdataDir, d);
+              return { id: d, mtime: fs.statSync(p).mtimeMs };
+            })
+            .sort((a, b) => b.mtime - a.mtime);
+          if (dirs.length > 0) {
+            return dirs[0].id;
+          }
+        } catch {}
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Prioritize reading Steam's remotecache.vdf directly for Auto-Cloud save files
+   * @param {string|number} appId Steam AppID
+   * @returns {Array<{absolutePath: string, placeholderPath: string, size: number, mtime: number, steamSha: string}>|null}
+   */
+  getSteamRemoteCacheFiles(appId) {
+    if (!appId) return null;
+    const strAppId = String(appId).trim();
+    if (!strAppId) return null;
+
+    const steamRoots = this.getSteamRoots();
+    const candidateVdfs = [];
+
+    for (const root of steamRoots) {
+      const userdataDir = path.join(root, 'userdata');
+      if (!fs.existsSync(userdataDir)) continue;
+
+      try {
+        const userDirs = fs.readdirSync(userdataDir).filter(d => /^\d+$/.test(d));
+        for (const u of userDirs) {
+          const vdfPath = path.join(userdataDir, u, strAppId, 'remotecache.vdf');
+          if (fs.existsSync(vdfPath)) {
+            try {
+              const stat = fs.statSync(vdfPath);
+              candidateVdfs.push({
+                vdfPath,
+                steamRoot: root,
+                userId: u,
+                mtime: stat.mtimeMs
+              });
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    if (candidateVdfs.length === 0) {
+      return null;
+    }
+
+    // Sort so the most recently modified remotecache.vdf comes first
+    candidateVdfs.sort((a, b) => b.mtime - a.mtime);
+
+    const home = os.homedir();
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const localAppDataLow = path.join(home, 'AppData', 'LocalLow');
+    const winDocuments = path.join(home, 'Documents');
+    const winSavedGames = path.join(home, 'Saved Games');
+    const programData = process.env.ProgramData || 'C:\\ProgramData';
+    const installDir = this.getSteamGameInstallDir(strAppId);
+
+    const IGNORED = new Set(['graphicsconfig.xml', 'remotecache.vdf']);
+
+    for (const item of candidateVdfs) {
+      let content = '';
+      try {
+        content = fs.readFileSync(item.vdfPath, 'utf8');
+      } catch {
+        continue;
+      }
+
+      const lines = content.split(/\r?\n/);
+      const entries = [];
+      let currentFile = null;
+      let currentObj = {};
+
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        const fileMatch = line.match(/^"([^"]+)"$/);
+        if (fileMatch) {
+          const key = fileMatch[1];
+          if (!['ChangeNumber', 'OSType', strAppId].includes(key)) {
+            if (currentFile && currentObj.root !== undefined) {
+              entries.push({ relPath: currentFile, ...currentObj });
+            }
+            currentFile = key;
+            currentObj = {};
+          }
+          continue;
+        }
+
+        const propMatch = line.match(/^"([^"]+)"\s+"([^"]*)"$/);
+        if (propMatch && currentFile) {
+          const [, k, v] = propMatch;
+          currentObj[k.toLowerCase()] = v;
+        }
+      }
+
+      if (currentFile && currentObj.root !== undefined) {
+        entries.push({ relPath: currentFile, ...currentObj });
+      }
+
+      const matchedFiles = [];
+
+      for (const entry of entries) {
+        const baseName = path.basename(entry.relPath).toLowerCase();
+        if (IGNORED.has(baseName)) continue;
+
+        const root = String(entry.root);
+        const cleanRel = entry.relPath.replace(/\\/g, '/');
+        const candidatePaths = [];
+
+        switch (root) {
+          case '0':
+            candidatePaths.push(path.join(item.steamRoot, 'userdata', item.userId, strAppId, 'remote', cleanRel));
+            if (installDir) candidatePaths.push(path.join(installDir, cleanRel));
+            break;
+          case '1':
+            if (installDir) candidatePaths.push(path.join(installDir, cleanRel));
+            candidatePaths.push(path.join(winDocuments, cleanRel));
+            candidatePaths.push(path.join(item.steamRoot, 'userdata', item.userId, strAppId, 'remote', cleanRel));
+            break;
+          case '2':
+            candidatePaths.push(path.join(winDocuments, cleanRel));
+            break;
+          case '3':
+            candidatePaths.push(path.join(localAppData, cleanRel));
+            break;
+          case '4':
+            candidatePaths.push(path.join(appData, cleanRel));
+            break;
+          case '5':
+            candidatePaths.push(path.join(winSavedGames, cleanRel));
+            break;
+          case '6':
+            candidatePaths.push(path.join(programData, cleanRel));
+            break;
+          case '12':
+            candidatePaths.push(path.join(localAppDataLow, cleanRel));
+            break;
+          default:
+            candidatePaths.push(
+              path.join(appData, cleanRel),
+              path.join(localAppData, cleanRel),
+              path.join(localAppDataLow, cleanRel),
+              path.join(winDocuments, cleanRel)
+            );
+        }
+
+        for (const cand of candidatePaths) {
+          if (fs.existsSync(cand)) {
+            try {
+              const stat = fs.statSync(cand);
+              if (stat.isFile()) {
+                matchedFiles.push({
+                  absolutePath: cand,
+                  placeholderPath: this.toPlaceholderPath(cand),
+                  size: stat.size,
+                  mtime: stat.mtimeMs,
+                  steamSha: entry.sha
+                });
+                break;
+              }
+            } catch {}
+          }
+        }
+      }
+
+      if (matchedFiles.length > 0) {
+        return matchedFiles;
+      }
+    }
+
+    return null;
+  }
+
   // Resolve placeholders into candidate paths or patterns
   resolvePatterns(rawPath) {
     let candidates = [rawPath];
@@ -98,13 +377,34 @@ class Scanner {
 
   // Resolve a single pattern (compatibility helper)
   resolvePattern(rawPath) {
-    const list = this.resolvePatterns(rawPath);
-    return list[0] || path.normalize(rawPath);
+    let resolved = rawPath;
+    if (resolved.includes('<storeUserId>')) {
+      const activeId = this.getActiveSteamUserId();
+      if (activeId) {
+        resolved = resolved.split('<storeUserId>').join(activeId);
+      }
+    }
+    const list = this.resolvePatterns(resolved);
+    return list[0] || path.normalize(resolved);
   }
 
   // Convert an absolute path into a placeholder path for portable storage
   toPlaceholderPath(absolutePath) {
     const normalized = path.normalize(absolutePath);
+
+    // Special handling for Steam userdata: <root>/userdata/<storeUserId>/...
+    for (const rootPath of this.knownRoots) {
+      const normalizedRoot = path.normalize(rootPath);
+      const userdataPrefix = path.join(normalizedRoot, 'userdata') + path.sep;
+      if (normalized.toLowerCase().startsWith(userdataPrefix.toLowerCase())) {
+        const sub = normalized.slice(userdataPrefix.length);
+        const parts = sub.split(path.sep);
+        if (parts.length > 1) {
+          return `<root>/userdata/<storeUserId>/${parts.slice(1).join('/')}`;
+        }
+      }
+    }
+
     // Sort directory placeholders by longest value first
     const sorted = Object.entries(this.directoryPlaceholders)
       .filter(([_, val]) => Boolean(val))
@@ -251,6 +551,54 @@ class Scanner {
   scanGame(game) {
     if (!game) return null;
 
+    // 1. Resolve steamId if available
+    let steamId = game.steamId || game.appId || (/^\d+$/.test(game.id) ? game.id : null);
+    if (!steamId && game.name) {
+      try {
+        const manifest = require('./manifest');
+        if (manifest.isLoaded) {
+          const found = manifest.findGame(null, game.name);
+          if (found && found.steamId) {
+            steamId = found.steamId;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. PRIORITY 1: Read Steam's remotecache.vdf directly
+    if (steamId) {
+      const steamFiles = this.getSteamRemoteCacheFiles(steamId);
+      if (steamFiles && steamFiles.length > 0) {
+        let totalSize = 0;
+        let latestMtime = 0;
+        for (const file of steamFiles) {
+          totalSize += file.size;
+          if (file.mtime > latestMtime) {
+            latestMtime = file.mtime;
+          }
+        }
+        const ludusaviGuiBackup = this.findLudusaviGuiBackup(game.name);
+        const saveFolder = steamFiles.length > 0 ? path.dirname(steamFiles[0].absolutePath) : null;
+        return {
+          id: game.id,
+          name: game.name,
+          steamId: steamId,
+          source: 'steam-remotecache',
+          installed: true,
+          saveFound: true,
+          fileCount: steamFiles.length,
+          totalSize: totalSize,
+          lastModified: latestMtime > 0 ? new Date(latestMtime).toISOString() : null,
+          saveFolder: saveFolder,
+          files: steamFiles,
+          ludusaviBackup: ludusaviGuiBackup
+        };
+      }
+    }
+
+    // 3. PRIORITY 2: Fallback to Ludusavi manifest scanning
     const matchedFiles = [];
     const currentPlatform = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
 
@@ -300,16 +648,20 @@ class Scanner {
     }
 
     const saveFound = fileDetails.length > 0;
+    const saveFolder = fileDetails.length > 0 ? path.dirname(fileDetails[0].absolutePath) : null;
     const ludusaviGuiBackup = this.findLudusaviGuiBackup(game.name);
 
     return {
       id: game.id,
       name: game.name,
+      steamId: steamId || null,
+      source: 'ludusavi-manifest',
       installed: saveFound,
       saveFound: saveFound,
       fileCount: fileDetails.length,
       totalSize: totalSize,
       lastModified: latestMtime > 0 ? new Date(latestMtime).toISOString() : null,
+      saveFolder: saveFolder,
       files: fileDetails,
       ludusaviBackup: ludusaviGuiBackup
     };

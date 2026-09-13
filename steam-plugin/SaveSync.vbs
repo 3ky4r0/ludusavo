@@ -12,5 +12,5 @@ exePath = strPath & "\SaveSync.exe"
 If FSO.FileExists(exePath) Then
     WshShell.Run """" & exePath & """" & args, 0, False
 Else
-    WshShell.Run "node --max-old-space-size=64 """ & strPath & "\server\index.js""" & args, 0, False
+    WshShell.Run "node """ & strPath & "\server\index.js""" & args, 0, False
 End If

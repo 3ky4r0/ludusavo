@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 const express = require('express');
 const config = require('./config');
 const manifest = require('./manifest');
@@ -7,9 +10,67 @@ const restoreManager = require('./restore');
 const syncManager = require('./sync');
 const gitHubClient = require('./github');
 
+let cachedSteamPath = null;
+function getSteamInstallPath() {
+  if (cachedSteamPath) return cachedSteamPath;
+
+  try {
+    const regOutput = execSync('reg query "HKCU\\Software\\Valve\\Steam" /v SteamPath', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    const match = regOutput.match(/SteamPath\s+REG_SZ\s+(.+)/i);
+    if (match && match[1]) {
+      const p = match[1].trim().replace(/\//g, '\\');
+      if (fs.existsSync(p)) {
+        cachedSteamPath = p;
+        return p;
+      }
+    }
+  } catch {}
+
+  const relativeCandidates = [
+    path.resolve(process.cwd(), '../../..'),
+    path.resolve(__dirname, '../../../..'),
+    'C:\\Program Files (x86)\\Steam',
+    'C:\\Program Files\\Steam',
+    'D:\\Steam',
+    'E:\\Steam'
+  ];
+
+  for (const cand of relativeCandidates) {
+    if (fs.existsSync(path.join(cand, 'appcache', 'librarycache'))) {
+      cachedSteamPath = cand;
+      return cand;
+    }
+  }
+
+  return null;
+}
+
 const app = express();
+
+// Enable CORS for Steam Client CEF and localhost apps
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
-app.use(express.static(config.WEB_DIR));
+
+app.get('/', (req, res) => {
+  res.json({
+    service: 'SaveSync Steam Daemon',
+    status: 'online',
+    version: '1.0.0',
+    description: 'Headless background API daemon for SaveSync Steam Millennium Plugin'
+  });
+});
 
 // Ensure manifest is loaded on server startup
 (async () => {
@@ -103,6 +164,43 @@ app.post('/api/manifest/update', async (req, res) => {
 });
 
 /**
+ * GET /api/manifest/find
+ * Search for a game definition across all 53,000 games in the manifest
+ */
+app.get('/api/manifest/find', (req, res) => {
+  try {
+    const { appid, name } = req.query;
+    const game = manifest.findGame(appid, name);
+    if (!game) {
+      return res.status(404).json({ success: false, error: 'Game not found in manifest database' });
+    }
+
+    const scan = scanner.scanGame(game);
+    const localMeta = backupManager.getLocalMeta(game.id);
+
+    res.json({
+      success: true,
+      game: {
+        id: game.id,
+        name: game.name,
+        steamId: game.steamId,
+        savePaths: game.savePaths,
+        installed: scan.installed,
+        saveFound: scan.saveFound,
+        fileCount: scan.fileCount,
+        totalSize: scan.totalSize,
+        lastModified: scan.lastModified,
+        saveFolder: scan.saveFolder || null,
+        localBackup: localMeta
+      }
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+
+/**
  * GET /api/games
  * Get list of detected games using cache for instant response
  * Pass ?rescan=true to force a full re-scan of the entire manifest
@@ -129,6 +227,7 @@ app.get('/api/games', (req, res) => {
         fileCount: scan.fileCount,
         totalSize: scan.totalSize,
         lastModified: scan.lastModified,
+        saveFolder: scan.saveFolder || null,
         localBackup: localMeta ? {
           updatedAt: localMeta.updatedAt,
           size: localMeta.size,
@@ -142,6 +241,62 @@ app.get('/api/games', (req, res) => {
       count: list.length,
       manifestTotal: allGames.length,
       games: list
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * GET /api/cloud-games
+ * List all games that have a remote backup on GitHub Cloud
+ */
+app.get('/api/cloud-games', async (req, res) => {
+  try {
+    if (!config.isGitHubConfigured()) {
+      return res.json({
+        success: true,
+        count: 0,
+        games: [],
+        error: 'GitHub not configured'
+      });
+    }
+
+    const remoteFilesMap = await gitHubClient.getRemoteFilesMap();
+    const cloudGameIds = new Set();
+    for (const filePath of remoteFilesMap.keys()) {
+      const match = filePath.match(/^saves\/([^/]+)\/meta\.json$/);
+      if (match) {
+        cloudGameIds.add(match[1]);
+      }
+    }
+
+    const cloudGames = await Promise.all(Array.from(cloudGameIds).map(async (id) => {
+      const gameDef = manifest.getGame(id);
+      const meta = await syncManager.getRemoteMeta(id, remoteFilesMap);
+      const scan = gameDef ? scanner.scanGame(gameDef) : { saveFound: false, installed: false };
+      
+      return {
+        id: id,
+        name: (meta && meta.name) || (gameDef && gameDef.name) || id,
+        steamId: (meta && meta.steamId) || (gameDef && gameDef.steamId) || null,
+        remoteMeta: meta,
+        local: scan,
+        installed: scan.installed || false,
+        saveFound: scan.saveFound || false
+      };
+    }));
+
+    cloudGames.sort((a, b) => {
+      const timeA = new Date(a.remoteMeta?.updatedAt || 0).getTime();
+      const timeB = new Date(b.remoteMeta?.updatedAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    res.json({
+      success: true,
+      count: cloudGames.length,
+      games: cloudGames
     });
   } catch (err) {
     handleError(res, err);
@@ -172,6 +327,149 @@ app.get('/api/games/:id', (req, res) => {
       localBackup: localMeta
     }
   });
+});
+
+/**
+ * GET /api/poster/:appId
+ * Serve game poster directly from local Steam client files (appcache / userdata grid),
+ * with fallback to cached Steam CDN download.
+ */
+app.get('/api/poster/:appId', async (req, res) => {
+  try {
+    const rawId = req.params.appId;
+    if (!rawId) {
+      return res.status(400).json({ success: false, error: 'Missing appId' });
+    }
+
+    let numericAppId = /^\d+$/.test(rawId) ? rawId : null;
+    let game = null;
+
+    if (!numericAppId) {
+      game = manifest.getGame(rawId);
+      if (!game) {
+        const clean = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (clean && manifest.nameMap && manifest.nameMap.has(clean)) {
+          game = manifest.nameMap.get(clean);
+        }
+      }
+      if (game && game.steamId) {
+        numericAppId = String(game.steamId);
+      }
+    } else {
+      game = manifest.steamIdMap ? manifest.steamIdMap.get(numericAppId) : null;
+    }
+
+    const idsToSearch = [];
+    if (rawId) idsToSearch.push(rawId);
+    if (numericAppId && numericAppId !== rawId) idsToSearch.push(numericAppId);
+
+    const steamDir = getSteamInstallPath();
+
+    // 1. Search in local Steam directories (userdata custom grids & appcache)
+    if (steamDir) {
+      for (const id of idsToSearch) {
+        // Priority A: Custom grid in userdata (portrait grid set by user or for non-steam games)
+        try {
+          const userdataDir = path.join(steamDir, 'userdata');
+          if (fs.existsSync(userdataDir)) {
+            const users = fs.readdirSync(userdataDir);
+            for (const u of users) {
+              const gridDir = path.join(userdataDir, u, 'config', 'grid');
+              if (fs.existsSync(gridDir)) {
+                const customFiles = [
+                  path.join(gridDir, `${id}p.jpg`),
+                  path.join(gridDir, `${id}p.png`),
+                  path.join(gridDir, `${id}.jpg`),
+                  path.join(gridDir, `${id}.png`),
+                  path.join(gridDir, `${id}_hero.jpg`)
+                ];
+                for (const cf of customFiles) {
+                  if (fs.existsSync(cf)) {
+                    res.setHeader('Cache-Control', 'public, max-age=86400');
+                    res.setHeader('X-Poster-Source', 'steam-userdata-grid');
+                    return res.sendFile(path.resolve(cf));
+                  }
+                }
+              }
+            }
+          }
+        } catch {}
+
+        // Priority B: Official Steam appcache library cache (supports both direct and modern SHA-1 hash subfolders)
+        const appDir = path.join(steamDir, 'appcache', 'librarycache', id);
+        if (fs.existsSync(appDir)) {
+          const targetNames = [
+            'library_600x900.jpg',
+            'library_capsule.jpg',
+            'library_header.jpg',
+            'header.jpg'
+          ];
+
+          let matchedPath = null;
+          // Direct check
+          for (const name of targetNames) {
+            const direct = path.join(appDir, name);
+            if (fs.existsSync(direct)) {
+              matchedPath = direct;
+              break;
+            }
+          }
+
+          // Search in modern Steam SHA-1 subdirectories
+          if (!matchedPath) {
+            try {
+              const entries = fs.readdirSync(appDir, { withFileTypes: true });
+              const subdirs = entries.filter(e => e.isDirectory()).map(e => path.join(appDir, e.name));
+              for (const name of targetNames) {
+                for (const subdir of subdirs) {
+                  const subPath = path.join(subdir, name);
+                  if (fs.existsSync(subPath)) {
+                    matchedPath = subPath;
+                    break;
+                  }
+                }
+                if (matchedPath) break;
+              }
+            } catch {}
+          }
+
+          if (matchedPath) {
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('X-Poster-Source', 'steam-appcache');
+            return res.sendFile(path.resolve(matchedPath));
+          }
+        }
+
+        // Also check legacy flat files named ${id}_library_600x900.jpg
+        const legacyCandidates = [
+          path.join(steamDir, 'appcache', 'librarycache', `${id}_library_600x900.jpg`),
+          path.join(steamDir, 'appcache', 'librarycache', `${id}_header.jpg`)
+        ];
+        for (const lp of legacyCandidates) {
+          if (fs.existsSync(lp)) {
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('X-Poster-Source', 'steam-appcache-legacy');
+            return res.sendFile(path.resolve(lp));
+          }
+        }
+      }
+    }
+
+    // 2. Search local SaveSync cache directory
+    const posterCacheDir = path.join(config.CACHE_DIR, 'posters');
+    for (const id of idsToSearch) {
+      const cachedFile = path.join(posterCacheDir, `${id}.jpg`);
+      if (fs.existsSync(cachedFile)) {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('X-Poster-Source', 'savesync-cache');
+        return res.sendFile(path.resolve(cachedFile));
+      }
+    }
+
+    return res.status(404).json({ success: false, error: 'Poster not found for ' + rawId });
+  } catch (err) {
+    handleError(res, err);
+  }
 });
 
 /**
@@ -274,7 +572,7 @@ app.post('/api/games/:id/restore', async (req, res) => {
 
   try {
     let restoreRes;
-    const source = req.body.source || 'remote'; // 'remote' or 'local'
+    const source = (req.body && req.body.source) || 'remote'; // 'remote' or 'local'
 
     if (source === 'remote') {
       restoreRes = await syncManager.downloadAndRestore(game);
@@ -510,6 +808,33 @@ app.post('/api/games/:id/open-folder', (req, res) => {
 });
 
 /**
+ * DELETE /api/games/:id/cloud
+ * Delete game save from GitHub cloud repository
+ */
+app.delete('/api/games/:id/cloud', async (req, res) => {
+  try {
+    const game = manifest.getGame(req.params.id);
+    if (!game) {
+      return res.status(404).json({ success: false, error: 'Game not found' });
+    }
+
+    const files = await gitHubClient.listFiles(game.id);
+    if (!files || files.length === 0) {
+      return res.status(404).json({ success: false, error: 'No cloud files found for this game' });
+    }
+
+    for (const file of files) {
+      await gitHubClient.deleteFile(file.path, file.sha, `Delete cloud backup for ${game.name}`);
+    }
+
+    syncManager.metaCache.delete(game.id);
+    res.json({ success: true, message: `Cloud backup for ${game.name} deleted successfully` });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
  * GET /api/games/:id/process-check
  * Check if the game executable is currently active in process list
  */
@@ -520,10 +845,10 @@ app.get('/api/games/:id/process-check', (req, res) => {
   }
 
   const slug = game.id.toLowerCase();
-  const { exec } = require('child_process');
+  const { execFile } = require('child_process');
 
   if (process.platform === 'win32') {
-    exec('tasklist /FO CSV /NH', (err, stdout) => {
+    execFile('tasklist.exe', ['/FO', 'CSV', '/NH'], { windowsHide: true }, (err, stdout) => {
       if (err) return res.json({ success: true, isRunning: false });
       const lines = stdout.toLowerCase().split('\n');
       let found = false;
@@ -548,77 +873,123 @@ app.get('/api/games/:id/process-check', (req, res) => {
   }
 });
 
+/**
+ * GET /api/poster/:appId
+ * Proxy and fallback Steam game posters from Steam CDNs with caching
+ */
+app.get('/api/poster/:appId', async (req, res) => {
+  const appId = req.params.appId;
+  if (!appId || appId === '0' || !/^\d+$/.test(appId)) {
+    return res.status(404).send('Invalid AppId');
+  }
+
+  const cdnCandidates = [
+    `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900.jpg`,
+    `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`,
+    `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/library_600x900.jpg`,
+    `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900.jpg`,
+    `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`,
+    `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/header.jpg`
+  ];
+
+  for (const url of cdnCandidates) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(Buffer.from(buffer));
+      }
+    } catch {
+      // continue to next candidate
+    }
+  }
+
+  res.status(404).send('Poster not found');
+});
+
+/**
+ * GET /api/banner/:appId
+ * Proxy and fallback horizontal Steam game banners (header.jpg / capsule) with caching
+ */
+app.get('/api/banner/:appId', async (req, res) => {
+  const appId = req.params.appId;
+  if (!appId || appId === '0' || !/^\d+$/.test(appId)) {
+    return res.status(404).send('Invalid AppId');
+  }
+
+  const cdnCandidates = [
+    `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`,
+    `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/header.jpg`,
+    `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/header.jpg`,
+    `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`,
+    `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_231x87.jpg`
+  ];
+
+  for (const url of cdnCandidates) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(Buffer.from(buffer));
+      }
+    } catch {
+      // continue to next candidate
+    }
+  }
+
+  res.status(404).send('Banner not found');
+});
+
+
+/**
+ * POST /api/shutdown
+ * Gracefully terminate the SaveSync daemon when Steam exits
+ */
+app.post('/api/shutdown', (req, res) => {
+  res.json({ success: true, message: 'Shutting down SaveSync daemon...' });
+  console.log('[Server] Shutdown signal received from Steam plugin. Exiting...');
+  setTimeout(() => process.exit(0), 300);
+});
+
+// Auto-terminate watchdog: If Steam Client closes, exit SaveSync silently
 if (require.main === module) {
+  const { execFile } = require('child_process');
+
+  // Automatic Steam Watchdog: exit daemon when Steam is closed
+  let steamSeen = false;
+  const startSteamWatchdog = () => {
+    if (process.platform !== 'win32') return;
+    const interval = setInterval(() => {
+      // Use execFile instead of exec so cmd.exe is NEVER launched and no window can flash
+      execFile('tasklist.exe', ['/FI', 'IMAGENAME eq steam.exe', '/NH'], { windowsHide: true }, (err, stdout) => {
+        if (err) return;
+        const isSteamRunning = stdout && stdout.toLowerCase().includes('steam.exe');
+        if (isSteamRunning) {
+          steamSeen = true;
+        } else if (steamSeen) {
+          console.log('[Server] Steam has closed. Terminating SaveSync daemon...');
+          clearInterval(interval);
+          process.exit(0);
+        }
+      });
+    }, 30000);
+    interval.unref();
+  };
+
   const startServer = (port) => {
     const server = app.listen(port, () => {
       const url = `http://localhost:${port}`;
-      console.log(`========================================`);
-      console.log(` SaveSync running at ${url}`);
+      console.log(`===================================================`);
+      console.log(` SaveSync Steam Plugin Daemon running at ${url}`);
       console.log(` GitHub Configured: ${config.isGitHubConfigured()}`);
-      console.log(`========================================`);
+      console.log(` Mode: Headless Background Service (Steam Lifecycle)`);
+      console.log(`===================================================`);
 
-      // Automatically open in native Desktop App Mode on startup
-      if (process.env.NO_OPEN !== '1' && process.env.NODE_ENV !== 'test') {
-        try {
-          const { exec } = require('child_process');
-          const fs = require('fs');
-          const path = require('path');
-
-          if (process.platform === 'win32') {
-            const candidates = [
-              (process.env['LOCALAPPDATA'] || '') + '\\Chromium\\Application\\chrome.exe',
-              (process.env['ProgramFiles'] || '') + '\\Google\\Chrome\\Application\\chrome.exe',
-              (process.env['ProgramFiles(x86)'] || '') + '\\Google\\Chrome\\Application\\chrome.exe',
-              (process.env['LOCALAPPDATA'] || '') + '\\Google\\Chrome\\Application\\chrome.exe',
-              (process.env['ProgramFiles(x86)'] || '') + '\\Microsoft\\Edge\\Application\\msedge.exe',
-              (process.env['ProgramFiles'] || '') + '\\Microsoft\\Edge\\Application\\msedge.exe',
-              (process.env['ProgramFiles'] || '') + '\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
-            ];
-
-            let browserPath = candidates.find(p => p && fs.existsSync(p));
-
-            if (!browserPath) {
-              const edgeCoreBase = 'C:\\Program Files (x86)\\Microsoft\\EdgeCore';
-              if (fs.existsSync(edgeCoreBase)) {
-                try {
-                  for (const s of fs.readdirSync(edgeCoreBase)) {
-                    const p = path.join(edgeCoreBase, s, 'msedge.exe');
-                    if (fs.existsSync(p)) { browserPath = p; break; }
-                  }
-                } catch { /* ignore */ }
-              }
-            }
-
-            if (browserPath) {
-              // Open in standalone native App Mode window (no URL bar, no tabs)
-              const profileDir = path.join(process.env.TEMP || 'C:\\temp', 'SaveSync-Profile');
-              const { spawn } = require('child_process');
-              const child = spawn(browserPath, [
-                `--app=${url}`,
-                '--window-size=1040,750',
-                `--user-data-dir=${profileDir}`
-              ], { detached: false, stdio: 'ignore' });
-
-              // When the user closes the app window, exit the server cleanly
-              child.on('exit', () => {
-                process.exit(0);
-              });
-            } else {
-              exec(`start "" "${url}"`);
-            }
-          } else if (process.platform === 'darwin') {
-            exec(`open -na "Google Chrome" --args --app="${url}"`, (err) => {
-              if (err) exec(`open "${url}"`);
-            });
-          } else {
-            exec(`google-chrome --app="${url}"`, (err) => {
-              if (err) exec(`xdg-open "${url}"`);
-            });
-          }
-        } catch {
-          // ignore browser launch failure
-        }
-      }
+      startSteamWatchdog();
     });
 
     server.on('error', (err) => {

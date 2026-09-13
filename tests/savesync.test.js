@@ -148,3 +148,30 @@ test('Performance Optimization: Async SHA-1 and Batch sync status', async () => 
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   }
 });
+
+test('Steam remotecache.vdf: Prioritize reading Auto-Cloud over manifest globs', () => {
+  // Test with real Persona 5 Royal (1687950) or Sekiro (814380) on this system if exists
+  const sekiroScan = scanner.scanGame({
+    id: 'sekiro-shadows-die-twice',
+    name: 'Sekiro: Shadows Die Twice',
+    steamId: 814380,
+    savePaths: [{ path: '<home>/AppData/Roaming/Sekiro/*/*' }]
+  });
+
+  if (sekiroScan && sekiroScan.saveFound) {
+    assert.strictEqual(sekiroScan.source, 'steam-remotecache', 'Source must be steam-remotecache when remotecache.vdf is available');
+    assert.ok(sekiroScan.files.length > 0, 'Must have save files');
+    // Verify graphics config is filtered out
+    const hasGraphicsConfig = sekiroScan.files.some(f => f.absolutePath.toLowerCase().includes('graphicsconfig.xml'));
+    assert.strictEqual(hasGraphicsConfig, false, 'GraphicsConfig.xml should be filtered out from save files');
+  }
+
+  // Test fallback for mock non-steam game
+  const fallbackScan = scanner.scanGame({
+    id: 'non-steam-game',
+    name: 'Non Steam Game',
+    savePaths: []
+  });
+  assert.strictEqual(fallbackScan.source, 'ludusavi-manifest', 'Source must fallback to ludusavi-manifest');
+});
+

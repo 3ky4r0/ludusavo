@@ -13,8 +13,6 @@ const MANIFEST_DIR = path.join(DATA_DIR, 'manifest');
 const CACHE_DIR = path.join(DATA_DIR, 'cache');
 const TEMP_DIR = path.join(ROOT_DIR, 'temp');
 
-// WEB_DIR should point to virtual snapshot if packaged, or local web dir
-const WEB_DIR = isPkg ? path.join(__dirname, '..', 'web') : path.join(ROOT_DIR, 'web');
 
 // Ensure external writable directories exist
 [DATA_DIR, MANIFEST_DIR, CACHE_DIR, TEMP_DIR].forEach((dir) => {
@@ -33,7 +31,7 @@ function reloadEnv() {
 
 module.exports = {
   get PORT() {
-    return process.env.PORT || 3000;
+    return process.env.PORT || 3636;
   },
   get GITHUB_TOKEN() {
     reloadEnv();
@@ -52,7 +50,6 @@ module.exports = {
   MANIFEST_DIR,
   CACHE_DIR,
   TEMP_DIR,
-  WEB_DIR,
   isGitHubConfigured() {
     return Boolean(this.GITHUB_TOKEN && this.GITHUB_OWNER && this.GITHUB_REPO);
   }

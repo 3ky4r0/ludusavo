@@ -330,6 +330,75 @@ body {
   color: var(--text-primary);
 }
 
+.rate-limit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  padding: 0 10px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.rate-limit-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.rate-limit-pill .rate-label {
+  color: var(--text-muted);
+}
+
+.rate-limit-pill strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-limit-pill.rate-healthy {
+  border-color: #d0d7de;
+  color: #1f2328;
+}
+
+.rate-limit-pill.rate-healthy i {
+  color: #1a7f37;
+}
+
+.rate-limit-pill.rate-warning {
+  border-color: #d4a72c;
+  background: #fff8c5;
+  color: #744d00;
+}
+
+.rate-limit-pill.rate-warning strong {
+  color: #744d00;
+}
+
+.rate-limit-pill.rate-warning i {
+  color: #9a6700;
+}
+
+.rate-limit-pill.rate-critical {
+  border-color: #ff8182;
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.rate-limit-pill.rate-critical strong {
+  color: #cf222e;
+}
+
+.rate-limit-pill.rate-critical i {
+  color: #cf222e;
+}
+
 .detected-badge {
   display: inline-flex;
   align-items: center;

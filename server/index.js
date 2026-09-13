@@ -40,8 +40,10 @@ function handleError(res, err, defaultStatus = 500) {
 app.get('/api/status', async (req, res) => {
   try {
     let repoStatus = null;
+    let rateLimit = null;
     if (config.isGitHubConfigured()) {
       repoStatus = await gitHubClient.checkRepository();
+      rateLimit = gitHubClient.rateLimit || await gitHubClient.getRateLimit();
     }
 
     res.json({
@@ -51,7 +53,8 @@ app.get('/api/status', async (req, res) => {
         configured: config.isGitHubConfigured(),
         owner: config.GITHUB_OWNER || null,
         repo: config.GITHUB_REPO || null,
-        repoStatus: repoStatus
+        repoStatus: repoStatus,
+        rateLimit: rateLimit
       },
       manifest: {
         loaded: manifest.isLoaded,
@@ -60,6 +63,22 @@ app.get('/api/status', async (req, res) => {
       },
       serverTime: new Date().toISOString()
     });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * GET /api/github/rate-limit
+ * Get latest GitHub API rate limit status
+ */
+app.get('/api/github/rate-limit', async (req, res) => {
+  try {
+    if (!config.isGitHubConfigured()) {
+      return res.json({ success: false, error: 'GitHub not configured' });
+    }
+    const rateLimit = await gitHubClient.getRateLimit();
+    res.json({ success: true, rateLimit });
   } catch (err) {
     handleError(res, err);
   }

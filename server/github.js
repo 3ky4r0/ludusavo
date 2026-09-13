@@ -6,6 +6,68 @@ class GitHubClient {
     this.cachedDefaultBranch = null;
     this._filesMapCache = null;
     this._filesMapCacheTime = 0;
+    this.rateLimit = null;
+  }
+
+  updateRateLimitFromHeaders(headers) {
+    if (!headers) return;
+    const limit = headers.get('x-ratelimit-limit');
+    const remaining = headers.get('x-ratelimit-remaining');
+    const reset = headers.get('x-ratelimit-reset');
+    const used = headers.get('x-ratelimit-used');
+
+    if (limit !== null && remaining !== null) {
+      const resetEpoch = reset ? parseInt(reset, 10) : null;
+      let resetTime = null;
+      let resetMinutes = null;
+      if (resetEpoch) {
+        resetTime = new Date(resetEpoch * 1000).toISOString();
+        resetMinutes = Math.max(0, Math.round((resetEpoch * 1000 - Date.now()) / 60000));
+      }
+
+      this.rateLimit = {
+        limit: parseInt(limit, 10),
+        remaining: parseInt(remaining, 10),
+        used: used ? parseInt(used, 10) : (parseInt(limit, 10) - parseInt(remaining, 10)),
+        reset: resetEpoch,
+        resetTime,
+        resetMinutes,
+        updatedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  async getRateLimit() {
+    if (!config.isGitHubConfigured()) {
+      return null;
+    }
+
+    try {
+      const res = await this.request('https://api.github.com/rate_limit', { method: 'GET' });
+      const data = await res.json();
+      if (data && data.rate) {
+        const resetEpoch = data.rate.reset;
+        let resetTime = null;
+        let resetMinutes = null;
+        if (resetEpoch) {
+          resetTime = new Date(resetEpoch * 1000).toISOString();
+          resetMinutes = Math.max(0, Math.round((resetEpoch * 1000 - Date.now()) / 60000));
+        }
+        this.rateLimit = {
+          limit: data.rate.limit,
+          remaining: data.rate.remaining,
+          used: data.rate.used,
+          reset: resetEpoch,
+          resetTime,
+          resetMinutes,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    } catch {
+      // Silently fall back to cached rateLimit
+    }
+
+    return this.rateLimit || null;
   }
 
   getHeaders() {
@@ -55,6 +117,10 @@ class GitHubClient {
       });
     } catch (networkErr) {
       throw this.sanitizeError(new Error(`Network error connecting to GitHub: ${networkErr.message}`));
+    }
+
+    if (response && response.headers) {
+      this.updateRateLimitFromHeaders(response.headers);
     }
 
     if (!response.ok) {

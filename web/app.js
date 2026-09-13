@@ -16,6 +16,8 @@ const el = {
   githubBanner: document.getElementById('github-banner'),
   githubStoragePill: document.getElementById('github-storage-pill'),
   githubRepoText: document.getElementById('github-repo-text'),
+  githubRatePill: document.getElementById('github-rate-pill'),
+  githubRateText: document.getElementById('github-rate-text'),
   searchInput: document.getElementById('search-input'),
   clearSearch: document.getElementById('clear-search'),
   countFound: document.getElementById('count-found'),
@@ -147,6 +149,11 @@ async function fetchStatus() {
     if (data.success) {
       state.github = data.github;
       updateGitHubStatusUI();
+      if (data.github && data.github.rateLimit) {
+        updateRateLimitUI(data.github.rateLimit);
+      } else {
+        updateRateLimitUI(null);
+      }
       if (data.manifest && data.manifest.gameCount) {
         if (el.manifestCount) {
           el.manifestCount.textContent = data.manifest.gameCount.toLocaleString();
@@ -165,6 +172,7 @@ function updateGitHubStatusUI() {
     if (el.githubBanner) el.githubBanner.classList.remove('hidden');
     el.githubStoragePill.className = 'storage-pill not-configured';
     el.githubRepoText.textContent = 'Not Configured';
+    if (el.githubRatePill) el.githubRatePill.classList.add('hidden');
   } else {
     if (el.githubBanner) el.githubBanner.classList.add('hidden');
     el.githubStoragePill.className = 'storage-pill connected';
@@ -178,6 +186,61 @@ function updateGitHubStatusUI() {
     }
   }
   refreshIcons();
+}
+
+function updateRateLimitUI(rateLimit) {
+  if (!el.githubRatePill || !el.githubRateText) return;
+
+  if (!state.github || !state.github.configured || !rateLimit) {
+    el.githubRatePill.classList.add('hidden');
+    return;
+  }
+
+  el.githubRatePill.classList.remove('hidden');
+  const remaining = typeof rateLimit.remaining === 'number' ? rateLimit.remaining : null;
+  const limit = typeof rateLimit.limit === 'number' ? rateLimit.limit : null;
+
+  if (remaining !== null && limit !== null) {
+    el.githubRateText.textContent = `${remaining.toLocaleString()} / ${limit.toLocaleString()}`;
+  } else {
+    el.githubRateText.textContent = '-- / --';
+  }
+
+  el.githubRatePill.classList.remove('rate-healthy', 'rate-warning', 'rate-critical');
+
+  if (remaining !== null && limit !== null && limit > 0) {
+    const ratio = remaining / limit;
+    if (ratio <= 0.05) {
+      el.githubRatePill.classList.add('rate-critical');
+    } else if (ratio <= 0.20) {
+      el.githubRatePill.classList.add('rate-warning');
+    } else {
+      el.githubRatePill.classList.add('rate-healthy');
+    }
+  }
+
+  let tooltip = `GitHub API: ${remaining !== null ? remaining.toLocaleString() : '--'} of ${limit !== null ? limit.toLocaleString() : '--'} requests remaining`;
+  if (rateLimit.resetMinutes !== null && rateLimit.resetMinutes !== undefined) {
+    const resetTimeStr = rateLimit.reset ? new Date(rateLimit.reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    tooltip += `\nResets in ~${rateLimit.resetMinutes}m${resetTimeStr ? ` (at ${resetTimeStr})` : ''}`;
+  }
+  tooltip += '\nClick to refresh quota';
+  el.githubRatePill.title = tooltip;
+
+  refreshIcons();
+}
+
+async function fetchRateLimit() {
+  if (!state.github || !state.github.configured) return;
+  try {
+    const res = await fetch('/api/github/rate-limit');
+    const data = await res.json();
+    if (data.success && data.rateLimit) {
+      updateRateLimitUI(data.rateLimit);
+    }
+  } catch (err) {
+    console.debug('Failed to fetch rate limit:', err);
+  }
 }
 
 async function loadGames(forceRescan = false) {
@@ -502,6 +565,7 @@ async function executeGitHubBackup(gameId) {
 
     showToast(`Backed up to GitHub (${formatBytes(data.meta?.size || data.meta?.zipSize)})`, 'success');
     await refreshGameStatus(gameId);
+    fetchRateLimit();
   } catch (err) {
     showToast(`Upload error: ${err.message}`, 'error');
   } finally {
@@ -552,6 +616,7 @@ async function executeGitHubRestore(gameId) {
 
     showToast(`Successfully restored ${data.restoredFiles.length} files for ${game.name}!`, 'success');
     await loadGames();
+    fetchRateLimit();
   } catch (err) {
     showToast(`GitHub restore error: ${err.message}`, 'error');
   } finally {
@@ -588,6 +653,7 @@ async function handleSync(gameId, resolution = null) {
     }
 
     await refreshGameStatus(gameId);
+    fetchRateLimit();
   } catch (err) {
     showToast(`Sync error: ${err.message}`, 'error');
   }
@@ -679,6 +745,7 @@ async function handleSyncAll() {
   el.btnSyncAll.innerHTML = '<i data-lucide="refresh-ccw" class="icon-sm"></i> Sync All';
   refreshIcons();
   await loadGames();
+  fetchRateLimit();
 }
 
 function openConflictModal(game, conflictData) {
@@ -840,6 +907,22 @@ document.addEventListener('DOMContentLoaded', () => {
       refreshIcons();
     }
   });
+
+  // Rate limit pill click to refresh
+  if (el.githubRatePill) {
+    el.githubRatePill.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/github/rate-limit');
+        const data = await res.json();
+        if (data.success && data.rateLimit) {
+          updateRateLimitUI(data.rateLimit);
+          showToast(`GitHub API: ${data.rateLimit.remaining?.toLocaleString()} / ${data.rateLimit.limit?.toLocaleString()} remaining`, 'info');
+        }
+      } catch (err) {
+        showToast('Failed to refresh rate limit', 'error');
+      }
+    });
+  }
 
   refreshIcons();
 });

@@ -17,8 +17,7 @@
     <header class="header">
       <div class="brand">
         <div class="logo-wrap">
-          <img src="icon-512.png" class="brand-logo-img" width="22" height="22" alt="SaveSync Logo">
-          <h1 class="logo">SaveSync</h1>
+          <img src="icon-512.png" class="brand-logo-img" width="22" height="22" alt="SaveSync Logo" title="SaveSync">
         </div>
       </div>
       <div class="header-actions">
@@ -27,6 +26,13 @@
           <i data-lucide="github" class="icon-sm"></i>
           <span class="storage-label">Storage:</span>
           <strong id="github-repo-text">...</strong>
+        </span>
+
+        <!-- GitHub API Rate Limit Pill -->
+        <span class="rate-limit-pill hidden" id="github-rate-pill" title="GitHub API Rate Limit (remaining / total calls per hour)">
+          <i data-lucide="gauge" class="icon-sm"></i>
+          <span class="rate-label">API:</span>
+          <strong id="github-rate-text">...</strong>
         </span>
 
         <span class="manifest-pill" id="manifest-stat" title="Total games supported in Ludusavi manifest">

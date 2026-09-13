@@ -54,3 +54,21 @@ test('REST API: GET /api/games/:id for valid and invalid id', async () => {
     server.close();
   }
 });
+
+test('REST API: GET /api/github/rate-limit', async () => {
+  const server = app.listen(0);
+  const port = server.address().port;
+
+  try {
+    const res = await fetch(`http://localhost:${port}/api/github/rate-limit`);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    if (data.rateLimit) {
+      assert.strictEqual(typeof data.rateLimit.limit, 'number');
+      assert.strictEqual(typeof data.rateLimit.remaining, 'number');
+    }
+  } finally {
+    server.close();
+  }
+});

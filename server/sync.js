@@ -18,42 +18,67 @@ const SYNC_STATES = {
 };
 
 class SyncManager {
+  constructor() {
+    this.metaCache = new Map(); // gameId -> { sha, meta }
+  }
+
   /**
    * Fetch remote metadata for a game from GitHub
    * @param {string} gameId
+   * @param {Map<string, object>|null} remoteFilesMap Optional preloaded repo tree map
    */
-  async getRemoteMeta(gameId) {
+  async getRemoteMeta(gameId, remoteFilesMap = null) {
     if (!config.isGitHubConfigured()) {
       return null;
     }
     const remotePath = `saves/${gameId}/meta.json`;
+
+    // Fast path: if remote files map is available, verify existence before network call
+    if (remoteFilesMap) {
+      if (!remoteFilesMap.has(remotePath)) {
+        return null;
+      }
+      const item = remoteFilesMap.get(remotePath);
+      const cached = this.metaCache.get(gameId);
+      if (cached && cached.sha === item.sha) {
+        return cached.meta;
+      }
+    }
+
     const fileRes = await gitHubClient.getFile(remotePath);
     if (!fileRes) {
       return null;
     }
     try {
-      return JSON.parse(fileRes.content.toString('utf8'));
+      const parsed = JSON.parse(fileRes.content.toString('utf8'));
+      this.metaCache.set(gameId, { sha: fileRes.sha, meta: parsed });
+      return parsed;
     } catch {
       return null;
     }
   }
 
   /**
-   * Check if local save files match remote metadata mappings exactly by hash and size
+   * Check if local save files match remote metadata mappings exactly by hash and size asynchronously
    */
-  areFilesIdentical(localFiles, remoteMappings) {
+  async areFilesIdentical(localFiles, remoteMappings) {
     if (!localFiles || !remoteMappings || localFiles.length !== remoteMappings.length) {
       return false;
     }
     const hashUtil = require('./hash');
     for (const localFile of localFiles) {
       try {
-        const localHashSha1 = hashUtil.computeSha1Sync(localFile.absolutePath);
-        const localHashSha256 = hashUtil.computeFileHashSync(localFile.absolutePath);
+        const localHashSha1 = await hashUtil.computeSha1(localFile.absolutePath);
         const match = remoteMappings.find(m => 
-          (m.fileHash === localHashSha1 || m.fileHash === localHashSha256) && m.size === localFile.size
+          m.fileHash === localHashSha1 && m.size === localFile.size
         );
-        if (!match) return false;
+        if (match) continue;
+
+        const localHashSha256 = await hashUtil.computeFileHash(localFile.absolutePath);
+        const matchSha256 = remoteMappings.find(m => 
+          m.fileHash === localHashSha256 && m.size === localFile.size
+        );
+        if (!matchSha256) return false;
       } catch {
         return false;
       }
@@ -81,15 +106,16 @@ class SyncManager {
   /**
    * Determine sync status for a game
    * @param {object} game Manifest game object
+   * @param {Map<string, object>|null} remoteFilesMap Optional preloaded repo tree map
    */
-  async getGameSyncStatus(game) {
+  async getGameSyncStatus(game, remoteFilesMap = null) {
     const localScan = scanner.scanGame(game);
     const localMeta = backupManager.getLocalMeta(game.id);
     let remoteMeta = null;
 
     if (config.isGitHubConfigured()) {
       try {
-        remoteMeta = await this.getRemoteMeta(game.id);
+        remoteMeta = await this.getRemoteMeta(game.id, remoteFilesMap);
       } catch (err) {
         console.warn(`[Sync] Could not check remote for ${game.id}:`, err.message);
       }
@@ -137,7 +163,7 @@ class SyncManager {
 
     // 1. First priority: Check if local save files match remote backup by hash/content
     const sha256Match = Boolean(localMeta && localMeta.sha256 && remoteMeta.sha256 && localMeta.sha256.toLowerCase() === remoteMeta.sha256.toLowerCase());
-    const contentMatch = sha256Match || this.areFilesIdentical(localScan.files, remoteMeta.mappings);
+    const contentMatch = sha256Match || (await this.areFilesIdentical(localScan.files, remoteMeta.mappings));
 
     if (contentMatch) {
       // Content on disk currently matches remote exactly!
@@ -223,6 +249,40 @@ class SyncManager {
   }
 
   /**
+   * Batch check sync status for games using 1 single GitHub tree API call
+   * @param {Array<object>} games List of manifest game objects
+   * @returns {Promise<Record<string, object>>} Map of gameId -> sync status
+   */
+  async getAllGamesSyncStatus(games) {
+    let remoteFilesMap = null;
+    if (config.isGitHubConfigured()) {
+      try {
+        remoteFilesMap = await gitHubClient.getRemoteFilesMap();
+      } catch (err) {
+        console.warn('[Sync] Could not fetch remote tree map:', err.message);
+      }
+    }
+
+    const results = await Promise.all(games.map(async (game) => {
+      try {
+        const status = await this.getGameSyncStatus(game, remoteFilesMap);
+        return { id: game.id, status };
+      } catch (err) {
+        return {
+          id: game.id,
+          status: { state: SYNC_STATES.LOCAL_ONLY, local: scanner.scanGame(game), remote: null }
+        };
+      }
+    }));
+
+    const statusMap = {};
+    for (const r of results) {
+      if (r) statusMap[r.id] = r.status;
+    }
+    return statusMap;
+  }
+
+  /**
    * Perform backup and upload to GitHub
    */
   async backupAndUpload(game) {
@@ -252,6 +312,8 @@ class SyncManager {
       metaBuffer,
       `SaveSync metadata for ${game.name}`
     );
+
+    this.metaCache.delete(game.id);
 
     return {
       success: true,
@@ -286,6 +348,8 @@ class SyncManager {
 
     // 3. Restore safely with SHA-256 validation
     const restoreRes = await restoreManager.restoreBackup(game.id, zipFile.content, remoteMeta.sha256);
+
+    this.metaCache.delete(game.id);
 
     return {
       success: true,

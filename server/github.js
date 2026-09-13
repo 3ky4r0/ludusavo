@@ -3,6 +3,9 @@ const config = require('./config');
 class GitHubClient {
   constructor() {
     this.baseUrl = 'https://api.github.com';
+    this.cachedDefaultBranch = null;
+    this._filesMapCache = null;
+    this._filesMapCacheTime = 0;
   }
 
   getHeaders() {
@@ -88,6 +91,7 @@ class GitHubClient {
     try {
       const res = await this.request('', { method: 'GET' });
       const data = await res.json();
+      this.cachedDefaultBranch = data.default_branch || 'main';
       return {
         accessible: true,
         private: data.private,
@@ -100,6 +104,58 @@ class GitHubClient {
         error: err.message
       };
     }
+  }
+
+  /**
+   * Fetch complete repository tree in a single API call
+   * @param {string|null} branch Optional branch name
+   * @returns {Promise<{tree: Array<{path: string, mode: string, type: string, sha: string, size?: number}>}>}
+   */
+  async getTree(branch = null) {
+    try {
+      let branchName = branch || this.cachedDefaultBranch || 'main';
+      const res = await this.request(`/git/trees/${encodeURIComponent(branchName)}?recursive=1`, {
+        method: 'GET'
+      });
+      return await res.json();
+    } catch (err) {
+      if (err.status === 404 || err.status === 409) {
+        return { tree: [] };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Get a map of all files in the repository: path -> { path, sha, size }
+   * Cached for 15 seconds to avoid redundant tree fetches
+   */
+  async getRemoteFilesMap(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && this._filesMapCache && (now - this._filesMapCacheTime < 15000)) {
+      return this._filesMapCache;
+    }
+
+    const treeData = await this.getTree();
+    const map = new Map();
+    if (treeData && Array.isArray(treeData.tree)) {
+      for (const item of treeData.tree) {
+        if (item.type === 'blob') {
+          map.set(item.path, item);
+        }
+      }
+    }
+    this._filesMapCache = map;
+    this._filesMapCacheTime = now;
+    return map;
+  }
+
+  /**
+   * Invalidate files map cache (e.g. after upload or delete)
+   */
+  invalidateCache() {
+    this._filesMapCache = null;
+    this._filesMapCacheTime = 0;
   }
 
   /**
@@ -188,6 +244,7 @@ class GitHubClient {
         content: base64Content
       })
     });
+    this.invalidateCache();
     return await res.json();
   }
 
@@ -210,6 +267,7 @@ class GitHubClient {
         sha: sha
       })
     });
+    this.invalidateCache();
     return await res.json();
   }
 
@@ -240,6 +298,7 @@ class GitHubClient {
         sha: sha
       })
     });
+    this.invalidateCache();
     return await res.json();
   }
 }

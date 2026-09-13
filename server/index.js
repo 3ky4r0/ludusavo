@@ -159,30 +159,11 @@ app.get('/api/games-status', async (req, res) => {
   try {
     const allGames = manifest.getAllGames();
     const detectedScans = scanner.getDetectedGames(allGames, false);
+    const targetGames = detectedScans
+      .map(scan => manifest.getGame(scan.id))
+      .filter(Boolean);
 
-    const results = await Promise.all(detectedScans.map(async (scan) => {
-      const gameObj = manifest.getGame(scan.id);
-      if (!gameObj) return null;
-      try {
-        const status = await syncManager.getGameSyncStatus(gameObj);
-        return {
-          id: scan.id,
-          status: status
-        };
-      } catch (err) {
-        return {
-          id: scan.id,
-          status: { state: 'LOCAL_ONLY', local: scan, remote: null }
-        };
-      }
-    }));
-
-    const statusMap = {};
-    for (const r of results) {
-      if (r) {
-        statusMap[r.id] = r.status;
-      }
-    }
+    const statusMap = await syncManager.getAllGamesSyncStatus(targetGames);
 
     res.json({
       success: true,
@@ -369,19 +350,31 @@ app.post('/api/sync', async (req, res) => {
     return res.status(503).json({ success: false, error: 'Manifest is not loaded' });
   }
 
-  const allGames = manifest.getAllGames();
+  const detectedScans = scanner.getDetectedGames(allGames, false);
+  const targetGameIds = new Set(detectedScans.map(s => s.id));
+
+  let remoteFilesMap = null;
+  if (config.isGitHubConfigured()) {
+    try {
+      remoteFilesMap = await gitHubClient.getRemoteFilesMap();
+      for (const filePath of remoteFilesMap.keys()) {
+        const match = filePath.match(/^saves\/([^/]+)\/meta\.json$/);
+        if (match) {
+          targetGameIds.add(match[1]);
+        }
+      }
+    } catch (err) {
+      console.warn('[Sync] Could not fetch remote tree map for sync-all:', err.message);
+    }
+  }
+
+  const targetGames = Array.from(targetGameIds).map(id => manifest.getGame(id)).filter(Boolean);
   const results = [];
   const conflicts = [];
 
-  for (const game of allGames) {
-    const scan = scanner.scanGame(game);
-    // Only attempt sync if save found locally or remote metadata exists
-    if (!scan.saveFound && !config.isGitHubConfigured()) {
-      continue;
-    }
-
+  for (const game of targetGames) {
     try {
-      const status = await syncManager.getGameSyncStatus(game);
+      const status = await syncManager.getGameSyncStatus(game, remoteFilesMap);
       if (status.state === syncManager.SYNC_STATES.NOT_FOUND) {
         continue;
       }

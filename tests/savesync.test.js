@@ -128,3 +128,23 @@ test('Step 10 & 11: Conflict Detection State Evaluation', async () => {
     fs.rmSync(testDir, { recursive: true, force: true });
   }
 });
+
+test('Performance Optimization: Async SHA-1 and Batch sync status', async () => {
+  const tmpFile = path.join(os.tmpdir(), `test_perf_${Date.now()}.txt`);
+  fs.writeFileSync(tmpFile, 'HELLO_PERFORMANCE_TEST_SHA1');
+
+  try {
+    const asyncSha1 = await hashUtil.computeSha1(tmpFile);
+    const syncSha1 = hashUtil.computeSha1Sync(tmpFile);
+    assert.strictEqual(asyncSha1, syncSha1, 'Async and sync SHA-1 must match exactly');
+
+    // Test batch sync status
+    const mockGame1 = { id: 'mock-g1', name: 'Mock G1', savePaths: [] };
+    const mockGame2 = { id: 'mock-g2', name: 'Mock G2', savePaths: [] };
+    const batchRes = await syncManager.getAllGamesSyncStatus([mockGame1, mockGame2]);
+    assert.ok(batchRes['mock-g1'], 'Batch status should include mock-g1');
+    assert.ok(batchRes['mock-g2'], 'Batch status should include mock-g2');
+  } finally {
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  }
+});

@@ -37,6 +37,22 @@ function computeFileHashSync(filePath) {
 }
 
 /**
+ * Compute SHA-1 hash of a file stream asynchronously
+ * @param {string} filePath
+ * @returns {Promise<string>} hex digest
+ */
+function computeSha1(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha1');
+    const stream = fs.createReadStream(filePath);
+
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', (err) => reject(err));
+  });
+}
+
+/**
  * Synchronous SHA-1 file hash for Ludusavi mapping.yaml compatibility
  * @param {string} filePath
  * @returns {string} hex digest
@@ -50,5 +66,6 @@ module.exports = {
   computeHash,
   computeFileHash,
   computeFileHashSync,
+  computeSha1,
   computeSha1Sync
 };

@@ -22,6 +22,13 @@
         </div>
       </div>
       <div class="header-actions">
+        <!-- Connected Storage Pill (inline, to the left of manifest) -->
+        <span class="storage-pill" id="github-storage-pill" title="GitHub Storage Repository">
+          <i data-lucide="github" class="icon-sm"></i>
+          <span class="storage-label">Storage:</span>
+          <strong id="github-repo-text">...</strong>
+        </span>
+
         <span class="manifest-pill" id="manifest-stat" title="Total games supported in Ludusavi manifest">
           <i data-lucide="database" class="icon-sm"></i>
           Manifest: <strong id="manifest-count">...</strong> games
@@ -31,7 +38,7 @@
           Update Manifest
         </button>
         <button id="btn-refresh" class="btn btn-secondary btn-sm" title="Rescan local save files">
-          <i data-lucide="scan" class="icon-sm"></i>
+          <i data-lucide="radar" class="icon-sm"></i>
           Rescan
         </button>
         <button id="btn-sync-all" class="btn btn-primary btn-sm" title="Synchronize all detected games with GitHub">
@@ -41,23 +48,13 @@
       </div>
     </header>
 
-    <!-- GitHub Status Bar -->
+    <!-- GitHub Status Bar (only shown if not configured) -->
     <div id="github-banner" class="banner banner-warn hidden">
       <div class="banner-content">
         <i data-lucide="alert-circle" class="banner-icon"></i>
         <div>
           <span class="banner-title">GitHub Not Configured</span>
           <span class="banner-desc">Set <code>GITHUB_TOKEN</code>, <code>GITHUB_OWNER</code>, and <code>GITHUB_REPO</code> in your <code>.env</code> file for cloud sync. Local backups work offline without GitHub.</span>
-        </div>
-      </div>
-    </div>
-
-    <div id="github-connected" class="banner banner-info hidden">
-      <div class="banner-content">
-        <i data-lucide="github" class="banner-icon"></i>
-        <div>
-          <span class="banner-title">Connected</span>
-          <span class="banner-desc" id="github-repo-text">Storage: github.com/...</span>
         </div>
       </div>
     </div>
@@ -101,9 +98,9 @@
 
     <!-- Main List Container -->
     <main class="game-list-wrap">
-      <div id="loading-state" class="state-message">
-        <div class="spinner"></div>
-        <p>Scanning game saves...</p>
+      <div id="loading-state" class="loading-state hidden">
+        <div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0"></div>
+        <span>Scanning game saves...</span>
       </div>
 
       <div id="empty-state" class="state-message hidden">
@@ -149,6 +146,35 @@
         <button id="btn-conflict-local" class="btn btn-primary">
           <i data-lucide="cloud-upload" class="icon-sm"></i>
           Keep Local (Upload to GitHub)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Confirm Modal Dialog (Backup & Restore) -->
+  <div id="confirm-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-header-content">
+          <i id="confirm-header-icon" data-lucide="alert-triangle" class="warning-icon text-purple"></i>
+          <h3 id="confirm-title">Confirm Action</h3>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p class="conflict-game-name" id="confirm-game-title">Game Title</p>
+        <p class="conflict-desc" id="confirm-desc">
+          Are you sure you want to proceed?
+        </p>
+        <div class="confirm-warning-box">
+          <i data-lucide="alert-triangle" class="warning-icon"></i>
+          <span id="confirm-warning-text">Notice: Save data may be modified or overwritten.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-confirm-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="btn-confirm-ok" class="btn btn-purple">
+          <i id="confirm-btn-icon" data-lucide="cloud-download" class="icon-sm"></i>
+          <span id="confirm-btn-label">Confirm</span>
         </button>
       </div>
     </div>

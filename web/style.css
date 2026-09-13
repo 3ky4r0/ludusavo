@@ -273,6 +273,46 @@ body {
   box-shadow: none;
 }
 
+.storage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  padding: 0 10px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.storage-pill .storage-label {
+  color: var(--text-muted);
+}
+
+.storage-pill strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.storage-pill.connected {
+  border-color: #a5d8ff;
+  background: #f0f8ff;
+  color: #0550ae;
+}
+
+.storage-pill.connected strong {
+  color: #0969da;
+}
+
+.storage-pill.not-configured {
+  border-color: #f1e05a;
+  background: #fff8c5;
+  color: #744d00;
+}
+
 .manifest-pill {
   display: inline-flex;
   align-items: center;
@@ -307,6 +347,37 @@ body {
   font-weight: 600;
   color: var(--text-primary);
   margin-right: 4px;
+}
+
+/* Confirm Dialog Specifics */
+.confirm-warning-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff8c5;
+  border: 1px solid #f1e05a;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #744d00;
+  line-height: 1.4;
+  margin-top: 10px;
+}
+
+.confirm-warning-box .warning-icon.lucide {
+  width: 16px;
+  height: 16px;
+  color: #9a6700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.text-purple {
+  color: var(--purple) !important;
+}
+
+.text-green {
+  color: var(--success) !important;
 }
 
 /* Flat Consistent Buttons */
@@ -553,6 +624,20 @@ body {
 }
 
 /* States */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
 .state-message {
   text-align: center;
   padding: 48px 16px;

@@ -75,11 +75,16 @@ class BackupManager {
       const ludusaviFiles = {};
       const fileMappings = [];
 
-      for (const file of scanResult.files) {
+      // Compute file hashes asynchronously in parallel without blocking the event loop
+      const fileSha1Promises = scanResult.files.map(file => hashUtil.computeSha1(file.absolutePath));
+      const fileSha1List = await Promise.all(fileSha1Promises);
+
+      for (let i = 0; i < scanResult.files.length; i++) {
+        const file = scanResult.files[i];
+        const fileSha1 = fileSha1List[i];
         const info = this.getLudusaviArchivePath(file.absolutePath);
         drives[info.driveKey] = info.driveRoot;
 
-        const fileSha1 = hashUtil.computeSha1Sync(file.absolutePath);
         ludusaviFiles[info.yamlPath] = {
           hash: fileSha1,
           size: file.size
@@ -131,7 +136,7 @@ class BackupManager {
       await new Promise((resolve, reject) => {
         const output = fs.createWriteStream(zipTempPath);
         const archive = archiver('zip', {
-          zlib: { level: 9 } // Best compression
+          zlib: { level: 6 } // Balanced standard compression (much faster than level 9 with nearly identical size)
         });
 
         output.on('close', resolve);

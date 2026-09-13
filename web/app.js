@@ -471,9 +471,6 @@ async function handleGitHubBackup(gameId) {
   const game = state.games.find(g => g.id === gameId);
   if (!game) return;
 
-  const safe = await checkProcessBeforeAction(game);
-  if (!safe) return;
-
   showConfirmDialog({
     title: 'Confirm GitHub Backup',
     gameTitle: game.name,
@@ -811,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnRefresh.disabled = true;
     el.btnRefresh.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0"></div> Scanning...';
     try {
-      await loadGames(true, true);
+      await loadGames(true);
       showToast(`Scan complete! Found ${state.games.length} games.`, 'success');
     } catch (err) {
       showToast(`Scan error: ${err.message}`, 'error');
@@ -833,7 +830,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
-      await loadGames(false, false);
+      await loadGames();
       showToast(`Manifest updated! Loaded ${data.gameCount?.toLocaleString() || ''} games.`, 'success');
     } catch (err) {
       showToast(`Failed to update manifest: ${err.message}`, 'error');

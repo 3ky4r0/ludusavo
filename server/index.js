@@ -38,27 +38,31 @@ function handleError(res, err, defaultStatus = 500) {
  * Get overall system and GitHub configuration status
  */
 app.get('/api/status', async (req, res) => {
-  let repoStatus = null;
-  if (config.isGitHubConfigured()) {
-    repoStatus = await gitHubClient.checkRepository();
-  }
+  try {
+    let repoStatus = null;
+    if (config.isGitHubConfigured()) {
+      repoStatus = await gitHubClient.checkRepository();
+    }
 
-  res.json({
-    success: true,
-    app: 'SaveSync',
-    github: {
-      configured: config.isGitHubConfigured(),
-      owner: config.GITHUB_OWNER || null,
-      repo: config.GITHUB_REPO || null,
-      repoStatus: repoStatus
-    },
-    manifest: {
-      loaded: manifest.isLoaded,
-      gameCount: manifest.games.size,
-      lastLoaded: manifest.lastLoaded
-    },
-    serverTime: new Date().toISOString()
-  });
+    res.json({
+      success: true,
+      app: 'SaveSync',
+      github: {
+        configured: config.isGitHubConfigured(),
+        owner: config.GITHUB_OWNER || null,
+        repo: config.GITHUB_REPO || null,
+        repoStatus: repoStatus
+      },
+      manifest: {
+        loaded: manifest.isLoaded,
+        gameCount: manifest.games.size,
+        lastLoaded: manifest.lastLoaded
+      },
+      serverTime: new Date().toISOString()
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
 });
 
 /**
@@ -350,6 +354,7 @@ app.post('/api/sync', async (req, res) => {
     return res.status(503).json({ success: false, error: 'Manifest is not loaded' });
   }
 
+  const allGames = manifest.getAllGames();
   const detectedScans = scanner.getDetectedGames(allGames, false);
   const targetGameIds = new Set(detectedScans.map(s => s.id));
 
@@ -464,7 +469,7 @@ app.post('/api/games/:id/open-folder', (req, res) => {
   const folderToOpen = path.normalize(path.dirname(firstFile));
 
   if (!fs.existsSync(folderToOpen)) {
-    return res.status(404).json({ success: false, error: 'Thư mục save không tồn tại trên máy tính' });
+    return res.status(404).json({ success: false, error: 'Save folder does not exist on this computer' });
   }
 
   if (process.platform === 'win32') {

@@ -71,9 +71,11 @@ class RestoreManager {
           for (const [origPath, fileInfo] of Object.entries(ludusaviData.backups[0].files)) {
             // Reconstruct internal archive path: e.g. drive-C/Users/...
             let archiveRelative = origPath;
-            for (const [driveAlias, driveLetter] of Object.entries(driveMap)) {
-              if (origPath.startsWith(driveLetter + ':') || origPath.startsWith(driveLetter + '/')) {
-                archiveRelative = path.join(driveAlias, origPath.slice(driveLetter.length + 1));
+            for (const [driveAlias, driveRoot] of Object.entries(driveMap)) {
+              // driveRoot is already like "C:" — match it directly (with / or \ after)
+              const prefix = driveRoot.endsWith('/') || driveRoot.endsWith('\\') ? driveRoot : driveRoot + '/';
+              if (origPath.startsWith(prefix) || origPath === driveRoot) {
+                archiveRelative = path.join(driveAlias, origPath.slice(driveRoot.length).replace(/^[/\\]/, ''));
                 break;
               }
             }

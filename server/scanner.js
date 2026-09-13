@@ -17,7 +17,10 @@ class Scanner {
     const programData = process.env.ProgramData || 'C:\\ProgramData';
     const winDir = process.env.SystemRoot || 'C:\\Windows';
     const winPublic = process.env.PUBLIC || 'C:\\Users\\Public';
-    const userName = process.env.USERNAME || (os.userInfo && os.userInfo().username) || '';
+    let userName = process.env.USERNAME || '';
+    if (!userName) {
+      try { userName = os.userInfo().username || ''; } catch { /* ignore */ }
+    }
 
     return {
       '<home>': home,

@@ -28,6 +28,7 @@ data/cache/*
 !data/cache/manifest_processed.json
 data/manifest/*.yaml
 data/manifest/*.json
+steam-plugin/data
 
 # Logs
 *.log

@@ -1,0 +1,222 @@
+<Page x:Class="SaveSync.Desktop.Views.Pages.GamesPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:vm="clr-namespace:SaveSync.Desktop.ViewModels"
+      mc:Ignorable="d"
+      d:DataContext="{d:DesignInstance vm:GamesViewModel}"
+      Title="GamesPage"
+      Background="{DynamicResource WindowBackgroundBrush}">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <!-- Toolbar: Search, Refresh, SyncAll -->
+            <RowDefinition Height="Auto"/>
+            <!-- Scanning Status Bar -->
+            <RowDefinition Height="Auto"/>
+            <!-- Games List -->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top Controls Toolbar -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Search Box with Icon -->
+            <Grid Grid.Column="0" Margin="0,0,10,0">
+                <TextBox x:Name="SearchBox"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Height="32"
+                         VerticalContentAlignment="Center"
+                         Padding="30,0,8,0"/>
+                <TextBlock Text="🔍"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Left"
+                           Margin="9,0,0,0"
+                           IsHitTestVisible="False"
+                           FontSize="12"
+                           Foreground="#888888"/>
+                <TextBlock Text="Tìm kiếm game..."
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Left"
+                           Margin="32,0,0,0"
+                           IsHitTestVisible="False"
+                           FontSize="12"
+                           Foreground="#888888">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+
+            <Button Grid.Column="1"
+                    Content="Quét lại"
+                    Command="{Binding RefreshScanCommand}"
+                    IsEnabled="{Binding IsScanning, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}"
+                    Height="32"
+                    Padding="14,0"
+                    Margin="0,0,10,0"/>
+
+            <Button Grid.Column="2"
+                    Content="Đồng bộ tất cả"
+                    Command="{Binding SyncAllCommand}"
+                    IsEnabled="{Binding IsScanning, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}"
+                    Height="32"
+                    Padding="14,0"/>
+        </Grid>
+
+        <!-- Scanning Status Bar -->
+        <Border Grid.Row="1"
+                Visibility="{Binding IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="16,10"
+                Margin="0,0,0,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0"
+                           Text="{Binding ScanStatusText}"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                           Margin="0,0,0,6"/>
+                <ProgressBar Grid.Row="1"
+                             Value="{Binding ScanProgress}"
+                             Height="8"
+                             IsIndeterminate="{Binding ScanProgress, Converter={StaticResource ZeroToIndeterminateConverter}, FallbackValue=False}"/>
+            </Grid>
+        </Border>
+
+        <!-- Games List -->
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Games}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Margin="0,0,0,8"
+                                Padding="12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Game Image Banner (Steam Header) -->
+                                <Border Grid.Column="0"
+                                        Width="140"
+                                        Height="65"
+                                        CornerRadius="4"
+                                        ClipToBounds="True"
+                                        Background="#E2E8F0"
+                                        Margin="0,0,14,0">
+                                    <Grid>
+                                        <Image Source="{Binding SteamBannerUrl}"
+                                               Stretch="UniformToFill"/>
+                                        <TextBlock Text="{Binding Name}"
+                                                   Visibility="{Binding SteamBannerUrl, Converter={StaticResource NullToVisibilityConverter}}"
+                                                   Foreground="#64748B"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Center"
+                                                   Margin="4"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Game Details -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   VerticalAlignment="Center"/>
+
+                                        <!-- Status Badge -->
+                                        <Border Background="{Binding StatusBadgeColor}"
+                                                CornerRadius="4"
+                                                Padding="6,2"
+                                                Margin="10,0,0,0"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding StatusBadgeText}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="White"/>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding FileCount, StringFormat='{}{0} files'}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,16,0"/>
+
+                                        <TextBlock Text="{Binding TotalSizeFormatted}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,16,0"/>
+
+                                        <TextBlock Text="{Binding LastModifiedFormatted, StringFormat='Lần sửa cuối: {0}'}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+
+                                    <!-- Status message when working -->
+                                    <TextBlock Text="{Binding StatusMessage}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                               Margin="0,4,0,0"
+                                               Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"/>
+                                </StackPanel>
+
+                                <!-- Action Buttons -->
+                                <StackPanel Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+
+                                    <Button Content="Mở thư mục"
+                                            Command="{Binding DataContext.OpenSaveFolderCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Margin="0,0,8,0"
+                                            Padding="12,0"
+                                            Height="32"/>
+
+                                    <Button Content="Sao lưu lên GitHub"
+                                            Style="{StaticResource PrimaryButton}"
+                                            Command="{Binding DataContext.SyncGameCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"
+                                            Padding="14,0"
+                                            Height="32"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Page>

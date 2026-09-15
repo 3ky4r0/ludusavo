@@ -1,0 +1,143 @@
+<Page x:Class="SaveSync.Desktop.Views.Pages.CloudPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:vm="clr-namespace:SaveSync.Desktop.ViewModels"
+      mc:Ignorable="d"
+      d:DataContext="{d:DesignInstance vm:CloudViewModel}"
+      Title="CloudPage"
+      Background="{DynamicResource WindowBackgroundBrush}">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock Text="Kho lưu trữ GitHub Cloud"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                <TextBlock Text="{Binding RateLimitInfo}"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+
+            <Button Grid.Column="1"
+                    Content="Làm mới"
+                    Command="{Binding RefreshCloudSavesCommand}"
+                    IsEnabled="{Binding IsLoading, Converter={StaticResource InverseBooleanConverter}, FallbackValue=True}"
+                    Padding="16,0"
+                    Height="32"/>
+        </Grid>
+
+        <!-- Status / Notice -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="14,10"
+                Margin="0,0,0,12">
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="13"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+        </Border>
+
+        <!-- Remote Saves List -->
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding RemoteSaves}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Margin="0,0,0,8"
+                                Padding="12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Game Image Banner (Steam Header) -->
+                                <Border Grid.Column="0"
+                                        Width="140"
+                                        Height="65"
+                                        CornerRadius="4"
+                                        ClipToBounds="True"
+                                        Background="#E2E8F0"
+                                        Margin="0,0,14,0">
+                                    <Grid>
+                                        <Image Source="{Binding SteamBannerUrl}"
+                                               Stretch="UniformToFill"/>
+                                        <TextBlock Text="{Binding GameName}"
+                                                   Visibility="{Binding SteamBannerUrl, Converter={StaticResource NullToVisibilityConverter}}"
+                                                   Foreground="#64748B"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Center"
+                                                   Margin="4"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Details -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding GameName}"
+                                               FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                               Margin="0,0,0,4"/>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding FileCount, StringFormat='{}{0} files'}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,16,0"/>
+
+                                        <TextBlock Text="{Binding FormattedSize}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   Margin="0,0,16,0"
+                                                   Visibility="{Binding FormattedSize, Converter={StaticResource StringToVisibilityConverter}}"/>
+
+                                        <TextBlock Text="{Binding FormattedTimestamp}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Actions -->
+                                <Button Grid.Column="2"
+                                        Content="Khôi phục về máy"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding DataContext.DownloadAndRestoreCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}"
+                                        VerticalAlignment="Center"
+                                        Padding="14,0"
+                                        Height="32"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Page>

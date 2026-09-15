@@ -1,0 +1,156 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tên Tag/Version (ví dụ: v1.0.0, bỏ trống để tự động tạo v1.0.<run_number>)'
+        required: false
+        default: ''
+      release_title:
+        description: 'Tiêu đề Release (bỏ trống để tự động đặt theo tag)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Đánh dấu là bản thử nghiệm (Pre-release)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release SaveSync
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine Version Tag & Title
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+              $tag = "${{ github.ref_name }}"
+          } elseif (-not [string]::IsNullOrWhiteSpace("${{ inputs.tag_name }}")) {
+              $tag = "${{ inputs.tag_name }}"
+          } else {
+              $tag = "v1.0.${{ github.run_number }}"
+          }
+
+          Write-Host "Determined release tag: $tag"
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.release_title }}")) {
+              $title = "${{ inputs.release_title }}"
+          } else {
+              $title = "SaveSync $tag"
+          }
+          echo "TITLE=$title" >> $env:GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: dotnet restore SaveSync.Wpf/SaveSync.Wpf.csproj
+
+      - name: Publish Standalone (Self-Contained, không cần cài .NET)
+        run: |
+          dotnet publish SaveSync.Wpf/SaveSync.Wpf.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/standalone
+
+      - name: Publish Portable (Framework-Dependent, siêu nhẹ)
+        run: |
+          dotnet publish SaveSync.Wpf/SaveSync.Wpf.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o dist/portable
+
+      - name: Package ZIP Distributions
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.TAG }}"
+          New-Item -ItemType Directory -Force -Path "artifacts"
+
+          # 1. Đóng gói Standalone Package (Chạy độc lập, không cần cài runtime)
+          $standaloneDir = "package/SaveSync-Standalone"
+          New-Item -ItemType Directory -Force -Path "$standaloneDir"
+          Copy-Item "dist/standalone/SaveSync.Wpf.exe" -Destination "$standaloneDir/SaveSync.exe"
+
+          if (Test-Path "data/cache/manifest_processed.json") {
+              New-Item -ItemType Directory -Force -Path "$standaloneDir/data/cache"
+              Copy-Item "data/cache/manifest_processed.json" -Destination "$standaloneDir/data/cache/"
+          }
+          if (Test-Path "assets") {
+              Copy-Item "assets" -Destination "$standaloneDir/" -Recurse
+          }
+          if (Test-Path "Run-SaveSync.bat") {
+              Copy-Item "Run-SaveSync.bat" -Destination "$standaloneDir/"
+          }
+          if (Test-Path "README.md") {
+              Copy-Item "README.md" -Destination "$standaloneDir/"
+          }
+
+          Compress-Archive -Path "$standaloneDir/*" -DestinationPath "artifacts/SaveSync-$tag-win-x64-standalone.zip" -Force
+
+          # 2. Đóng gói Portable Package (Gọn nhẹ, yêu cầu .NET 8 Desktop Runtime)
+          $portableDir = "package/SaveSync-Portable"
+          New-Item -ItemType Directory -Force -Path "$portableDir"
+          Copy-Item "dist/portable/SaveSync.Wpf.exe" -Destination "$portableDir/SaveSync.exe"
+
+          if (Test-Path "data/cache/manifest_processed.json") {
+              New-Item -ItemType Directory -Force -Path "$portableDir/data/cache"
+              Copy-Item "data/cache/manifest_processed.json" -Destination "$portableDir/data/cache/"
+          }
+          if (Test-Path "assets") {
+              Copy-Item "assets" -Destination "$portableDir/" -Recurse
+          }
+          if (Test-Path "Run-SaveSync.bat") {
+              Copy-Item "Run-SaveSync.bat" -Destination "$portableDir/"
+          }
+          if (Test-Path "README.md") {
+              Copy-Item "README.md" -Destination "$portableDir/"
+          }
+
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "artifacts/SaveSync-$tag-win-x64-portable.zip" -Force
+
+          Write-Host "Danh sách file artifacts tạo ra:"
+          Get-ChildItem -Path "artifacts"
+
+      - name: Create Git Tag (nếu chưa có)
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.TAG }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          $exists = git tag -l $tag
+          if (-not $exists) {
+              Write-Host "Creating git tag $tag..."
+              git tag -a $tag -m "Release $tag"
+              git push origin $tag
+          } else {
+              Write-Host "Tag $tag đã tồn tại."
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: ${{ steps.version.outputs.TITLE }}
+          files: |
+            artifacts/*.zip
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease || false }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
